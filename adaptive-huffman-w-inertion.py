@@ -1,12 +1,14 @@
+import datetime
 import operator
 import os
 import collections
 import math
+import csv
 
 from bitarray import bitarray, bits2bytes
 
 
- ### UTIL METHODS
+### UTIL METHODS
 def bin_str2bool_list(binary_string):
     return [c == '1' for c in binary_string]
 
@@ -29,7 +31,6 @@ def entropy(byte_seq):
 
 
 NYT = 'NYT'
-
 
 # pylint: disable=too-many-instance-attributes
 class Tree:
@@ -125,7 +126,7 @@ def exchange(node1, node2):
 
 # pylint: disable=too-many-instance-attributes
 class AdaptiveHuffman:
-    def __init__(self, byte_seq, alphabet_range=(0, 255), INERTION=1000):
+    def __init__(self, byte_seq, alphabet_range=(0, 255), INERTION=999999999):
         """Create an adaptive huffman encoder and decoder.
 
         Args:
@@ -141,7 +142,7 @@ class AdaptiveHuffman:
         self._bits_idx = 0  # Only used in decode().
 
         self.INERTION = INERTION
-        self.processed_symbols = 0  # track number of symbols processed
+        self.symbols_count = 0  # track number of symbols processed
 
         # Get the first decimal number of all alphabets
         self._alphabet_first_num = min(alphabet_range)
@@ -191,7 +192,7 @@ class AdaptiveHuffman:
                 )
             return bin_str2bool_list(fixed_str)
 
-        print('entropy: %f', entropy(self.byte_seq))
+        # print('entropy: %f', entropy(self.byte_seq))
 
         code = []
         for symbol in self.byte_seq:
@@ -330,10 +331,11 @@ class AdaptiveHuffman:
             current_node = current_node.parent
             first_appearance = False
 
-        self.processed_symbols += 1
-        if self.processed_symbols >= self.INERTION:
+        self.symbols_count += 1
+        if self.symbols_count >= self.INERTION:
+            # print("halving weights")
             self.halve_weights()
-            self.processed_symbols = 0  # Reset the counter after halving
+            self.symbols_count = 0
 
     def halve_weights(self):
         # divide weights by half
@@ -341,10 +343,10 @@ class AdaptiveHuffman:
             node.weight = max(1, node.weight // 2)  #make sure weights dont drop under 1
 
 
-def compress_text(text, alphabet_range=(0, 255)):
+def compress_text(text, alphabet_range=(0, 255), inertion=0):
     # Convert text to a byte sequence
     byte_seq = text.encode('utf-8')
-    ada_huff = AdaptiveHuffman(byte_seq, alphabet_range)
+    ada_huff = AdaptiveHuffman(byte_seq, alphabet_range, inertion)
     code = ada_huff.encode()
     return code
 
@@ -357,7 +359,6 @@ def extract_text(code, alphabet_range=(0, 255)):
     return bytes(decoded_bytes).decode('utf-8')
 
 
-
 def read_text_from_out(file_name):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(script_dir, 'out')
@@ -367,18 +368,82 @@ def read_text_from_out(file_name):
         text_content = file.read()
     return text_content
 
-
-def test_file():
-    file_name = 'short-text.txt'  # Replace with the actual file name
+def test_inertion(file_name, inertion_arr):
     text_string = read_text_from_out(file_name)
 
-    print(len(text_string))
 
-    encoded_text = compress_text(text_string)
-    print(len(encoded_text))
+    results = []
+    for i in reversed(inertion_arr):
+        try:
+            print(f"encoding with inertion {i}")
+            encoded_bits = compress_text(text_string, inertion=i)
+            compressed_size_in_bits = len(encoded_bits)
+            compressed_size_in_bytes = compressed_size_in_bits / 8
+            original_size_in_bytes = len(text_string.encode('utf-8'))
+            percent_compression = ((original_size_in_bytes - compressed_size_in_bytes) / original_size_in_bytes) * 100
 
-    decoded_text = extract_text(encoded_text)
-    print(len(decoded_text))
+            # print(text_string)
+            # print(encoded_bits)
 
-test_file()
+            print(
+                f"INERTION: {i}\t\t Compressed size: {compressed_size_in_bytes:.2f} bytes\t\tPercent Compression: {percent_compression:.10f}%")
+            results.append([i, compressed_size_in_bytes, original_size_in_bytes, percent_compression])
+        except Exception as e:
+            print(f"Error at INERTION {i}: {e}")
+            results.append([i, 'error', 'error', 'error'])
+
+
+    with open(f"out/compression_results.csv", mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Inertion', 'Compressed size in bytes', 'Original Size in bytes', 'Percent of compression (%)'])
+        writer.writerows(results)
+
+    print("Results saved to out/'compression_results.csv'")
+
+
+
+def run_compression(inertion, file_name):
+    text_string = read_text_from_out(file_name)
+    encoded_text = compress_text(text_string, inertion=inertion)
+    with open(f"out/output_{inertion}.txt", "w") as text_file:
+        text_file.write(encoded_text.to01())
+    with open(f"out/output_{inertion}.bin", "wb") as binary_file:
+        encoded_text.tofile(binary_file)
+#
+# def test_file():
+#     file_name = 'short-text.txt'
+#     text_string = read_text_from_out(file_name)
+#
+#     print(len(text_string))
+#
+#     encoded_text = compress_text(text_string)
+#     print(len(encoded_text))
+#
+#     decoded_text = extract_text(encoded_text)
+#     print(len(decoded_text))
+#
+#
+# def test_inertion_for_values():
+#     file_name = 'short-text.txt'
+#     text_string = read_text_from_out(file_name)
+#     print("reading")
+#     for i in range(10, len(text_string)):
+#         try:
+#             encoded_text = compress_text(text_string, inertion=i)
+#             print(f"INERTION: {i}\t\t Total compressed {len(encoded_text)}")
+#         except:
+#             print(f"error at INERTION {i}")
+#
+
+# test_inertion_for_values()
+
+
+text_file_name = "initial-text.txt"
+
+# inertions = [2**i for i in range(10, 24)]
+# print(inertions)
+# test_inertion(text_file_name, inertions)
+
+appropriate_inertion = 1024
+run_compression(appropriate_inertion, text_file_name)
 
